@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Play, Pause, SkipForward, SkipBack, ChevronDown, Shuffle, Repeat, Cast as CastIcon, Mic2 } from 'lucide-react';
 import { Song, SubsonicCredentials, Lyrics } from '../types';
 import { getStreamUrl, getLyrics } from '../services/subsonicService';
+import { Capacitor } from '@capacitor/core';
 
 interface PlayerProps {
   currentSong: Song | null;
@@ -153,28 +154,38 @@ const Player: React.FC<PlayerProps> = ({
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // --- CHROMECAST (Native Plugin via Dynamic Import) ---
+  // --- CHROMECAST LOGIC ---
   const handleCast = async () => {
-      try {
-        // Dynamically import to prevent crash on web preview/load if module is missing
-        const { Cast } = await import('@capacitor-community/cast');
-        
-        // This invokes the native Android Cast dialog
-        await Cast.requestSession();
-        
-        if (currentSong) {
-             const url = getStreamUrl(credentials, currentSong.id);
-             await Cast.loadMedia({
-                 url: url,
-                 title: currentSong.title,
-                 subtitle: currentSong.artist,
-                 contentType: 'audio/mp3', // Adjust based on Subsonic transcoding settings
-                 autoPlay: true
-             });
-        }
-      } catch (error) {
-          console.error("Cast plugin error:", error);
-          alert("Native Cast is not available in the web preview. Please build to Android to use this feature.");
+      // Check if we are running native (Android/iOS)
+      if (Capacitor.isNativePlatform()) {
+          try {
+              // Dynamic import ensures this only runs if the package is installed and we are in a capable environment
+              const { Cast } = await import('@capacitor-community/cast');
+              
+              await Cast.requestSession();
+              
+              if (currentSong) {
+                  const url = getStreamUrl(credentials, currentSong.id);
+                  await Cast.loadMedia({
+                      url: url,
+                      title: currentSong.title,
+                      subtitle: currentSong.artist,
+                      contentType: 'audio/mp3', 
+                      autoPlay: true
+                  });
+              }
+          } catch (error) {
+              console.error("Native Cast Error:", error);
+              alert("Cast plugin not installed or failed to initialize on device.");
+          }
+      } else {
+          // Web Fallback / Warning
+          if (window.location.protocol === 'http:') {
+              alert("Chromecast requires HTTPS. Current connection is HTTP.");
+          } else {
+               // Attempt Web Cast (will likely fail for HTTP streams due to mixed content)
+               alert("Web Casting of HTTP streams (Navidrome) is not supported by browsers due to security rules. Please use the Android App.");
+          }
       }
   };
 

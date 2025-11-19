@@ -10,7 +10,7 @@
   "dependencies": {
     "@capacitor/android": "^6.0.0",
     "@capacitor/core": "^6.0.0",
-    "@caprockapps/capacitor-chromecast": "^1.0.0",
+    "@caprockapps/capacitor-chromecast": "*",
     "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

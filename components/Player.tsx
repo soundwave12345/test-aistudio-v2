@@ -3,7 +3,7 @@ import { Play, Pause, SkipForward, SkipBack, ChevronDown, Shuffle, Repeat, Cast 
 import { Song, SubsonicCredentials, Lyrics } from '../types';
 import { getStreamUrl, getLyrics } from '../services/subsonicService';
 import { Capacitor } from '@capacitor/core';
-import { Chromecast } from '@caprockapps/capacitor-chromecast';
+import NativeCast from '../plugins/NativeCast';
 
 interface PlayerProps {
   currentSong: Song | null;
@@ -40,10 +40,9 @@ const Player: React.FC<PlayerProps> = ({
   // --- INITIALIZATION ---
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
-      // Initialize Native Chromecast Plugin
-      // appId 'CC1AD845' is the Default Media Receiver
-      Chromecast.initialize({ appId: 'CC1AD845' })
-        .catch(err => console.error("Chromecast Init Error:", err));
+      // Initialize our custom plugin
+      NativeCast.initialize({ appId: 'CC1AD845' }) // Default Media Receiver
+        .catch(err => console.error("NativeCast Init Error:", err));
     }
   }, []);
 
@@ -52,7 +51,6 @@ const Player: React.FC<PlayerProps> = ({
       if (currentSong) {
           setLyrics(null);
           setParsedLyrics([]);
-          // Changed: Pass the full currentSong object, not just ID
           getLyrics(credentials, currentSong).then(l => {
               if (l) {
                   setLyrics(l);
@@ -65,7 +63,6 @@ const Player: React.FC<PlayerProps> = ({
   const parseLyrics = (content: string) => {
       const lines = content.split('\n');
       const parsed = [];
-      // Regex for [mm:ss.xx]
       const timeReg = /\[(\d{2}):(\d{2})(\.\d{2,3})?\]/;
       
       let hasTimestamps = false;
@@ -81,13 +78,11 @@ const Player: React.FC<PlayerProps> = ({
               const text = line.replace(timeReg, '').trim();
               if (text) parsed.push({ time, text });
           } else if (line.trim()) {
-              // If mixed or no timestamps, just push with 0 or handle as plain text
               parsed.push({ time: -1, text: line.trim() });
           }
       }
 
       if (!hasTimestamps) {
-          // Plain text lyrics
            setParsedLyrics(lines.map(l => ({ time: -1, text: l })));
       } else {
            setParsedLyrics(parsed);
@@ -95,7 +90,6 @@ const Player: React.FC<PlayerProps> = ({
   };
 
   // --- AUDIO LOGIC ---
-  // Handle Audio Source
   useEffect(() => {
     if (currentSong && audioRef.current) {
       const url = getStreamUrl(credentials, currentSong.id);
@@ -107,7 +101,6 @@ const Player: React.FC<PlayerProps> = ({
     }
   }, [currentSong, credentials]);
 
-  // Handle Play/Pause toggle
   useEffect(() => {
     if (!audioRef.current) return;
     if (isPlaying) {
@@ -117,7 +110,6 @@ const Player: React.FC<PlayerProps> = ({
     }
   }, [isPlaying]);
 
-  // Android Auto / Media Session API Integration
   useEffect(() => {
     if ('mediaSession' in navigator && currentSong) {
         navigator.mediaSession.metadata = new MediaMetadata({
@@ -136,8 +128,6 @@ const Player: React.FC<PlayerProps> = ({
     }
   }, [currentSong, onPlayPause, onPrev, onNext]);
 
-
-  // Time Update Loop
   const handleTimeUpdate = () => {
     if (audioRef.current) {
       const cur = audioRef.current.currentTime;
@@ -165,32 +155,42 @@ const Player: React.FC<PlayerProps> = ({
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // --- CHROMECAST LOGIC (NATIVE) ---
+  // --- CHROMECAST LOGIC (CUSTOM NATIVE) ---
   const handleCast = async () => {
     if (!Capacitor.isNativePlatform()) {
-        alert("Native Chromecast is only available when running as an Android App (APK). It is not available in the web browser preview.");
+        alert("Questa funzione richiede l'app Android nativa.");
         return;
     }
 
     try {
-        // 1. Request Session (Opens the Cast Dialog)
-        await Chromecast.requestSession();
+        // 1. Open the native Cast picker dialog
+        await NativeCast.showRoutePicker();
         
-        // 2. If successful, load the media
+        // 2. If we have a song, queue it immediately after picking a device
+        // (In a real implementation, you'd listen for connection events, 
+        // but sending loadMedia usually triggers connection if pending)
         if (currentSong) {
             const url = getStreamUrl(credentials, currentSong.id);
-            // @caprockapps implementation takes string url
-            await Chromecast.launchMedia(url);
+            
+            // Wait a moment for connection to stabilize
+            setTimeout(async () => {
+                await NativeCast.loadMedia({
+                    url: url,
+                    title: currentSong.title,
+                    artist: currentSong.artist,
+                    coverUrl: currentSong.coverArt,
+                    duration: currentSong.duration
+                });
+                // Pause local audio when casting
+                onPlayPause(); 
+            }, 1000);
         }
     } catch (e) {
         console.error("Native Cast Error:", e);
-        alert("Cast failed. Make sure you are on the same Wi-Fi.");
     }
   };
 
   // --- UI RENDERING ---
-
-  // Helper to get active lyric line
   const getActiveLyricIndex = () => {
       if (parsedLyrics.length === 0 || parsedLyrics[0].time === -1) return -1;
       for (let i = parsedLyrics.length - 1; i >= 0; i--) {
@@ -200,8 +200,6 @@ const Player: React.FC<PlayerProps> = ({
   };
 
   const activeLyricIndex = getActiveLyricIndex();
-
-  // Auto scroll lyrics
   const lyricsContainerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
       if (showLyrics && activeLyricIndex !== -1 && lyricsContainerRef.current) {
@@ -214,10 +212,9 @@ const Player: React.FC<PlayerProps> = ({
 
   return (
     <>
-      {/* 1. Full Screen Player UI - Z-Index increased to 60 to cover bottom nav (z-50) */}
+      {/* 1. Full Screen Player UI */}
       {currentSong && isExpanded && (
         <div className="fixed inset-0 z-[60] bg-black flex flex-col animate-in slide-in-from-bottom duration-300">
-            {/* Super Blurred Chromatic Background */}
             <div 
               className="absolute inset-0 z-0 opacity-60 blur-3xl scale-150 pointer-events-none" 
               style={{ 
@@ -229,19 +226,16 @@ const Player: React.FC<PlayerProps> = ({
             />
             <div className="absolute inset-0 z-0 bg-black/40" />
 
-            {/* Header */}
             <div className="relative z-10 flex items-center justify-between px-6 py-8 md:py-6">
               <button onClick={onCollapse} className="text-white hover:text-subsonic-primary p-2 rounded-full hover:bg-white/10 transition-all">
                 <ChevronDown size={32} />
               </button>
               <span className="text-xs font-bold tracking-widest uppercase text-white/80">Now Playing</span>
-              {/* Cast Button */}
               <button onClick={handleCast} className="text-white hover:text-subsonic-primary p-2">
                  <CastIcon size={24} />
               </button>
             </div>
 
-            {/* Main Content: Toggle between Art and Lyrics */}
             <div className="relative z-10 flex-1 flex items-center justify-center p-6 min-h-0 overflow-hidden">
                {showLyrics && lyrics ? (
                    <div ref={lyricsContainerRef} className="w-full h-full overflow-y-auto hide-scrollbar text-center px-4 py-10 space-y-6 mask-image-gradient">
@@ -257,7 +251,7 @@ const Player: React.FC<PlayerProps> = ({
                                 {line.text}
                             </p>
                         ))}
-                        <div className="h-20" /> {/* Spacer */}
+                        <div className="h-20" />
                    </div>
                ) : (
                     <div className="w-full max-w-xs md:max-w-md aspect-square rounded-2xl overflow-hidden shadow-2xl border border-white/10 ring-1 ring-white/5 transition-transform duration-500">
@@ -270,7 +264,6 @@ const Player: React.FC<PlayerProps> = ({
                )}
             </div>
 
-            {/* Info & Controls */}
             <div className="relative z-10 pb-12 px-8 w-full max-w-2xl mx-auto bg-gradient-to-t from-black/80 to-transparent pt-10">
               <div className="flex justify-between items-end mb-6">
                   <div className="text-left min-w-0 flex-1 pr-4">
@@ -278,7 +271,6 @@ const Player: React.FC<PlayerProps> = ({
                     <p className="text-lg text-subsonic-secondary truncate mt-1">{currentSong.artist}</p>
                     <p className="text-sm text-white/50 truncate">{currentSong.album}</p>
                   </div>
-                  {/* Lyrics Toggle Button */}
                   <button 
                     onClick={() => setShowLyrics(!showLyrics)}
                     disabled={!lyrics}
@@ -292,7 +284,6 @@ const Player: React.FC<PlayerProps> = ({
                   </button>
               </div>
 
-              {/* Progress */}
               <div className="mb-8">
                 <input 
                   type="range" 
@@ -308,7 +299,6 @@ const Player: React.FC<PlayerProps> = ({
                 </div>
               </div>
 
-              {/* Main Controls */}
               <div className="flex flex-col gap-8">
                   <div className="flex items-center justify-between px-4 md:px-12">
                      <button className="text-subsonic-secondary hover:text-white transition-colors">
@@ -341,7 +331,7 @@ const Player: React.FC<PlayerProps> = ({
         </div>
       )}
 
-      {/* 2. Mini Player UI - Always visible when not expanded, z-index just below full screen */}
+      {/* 2. Mini Player UI */}
       {currentSong && !isExpanded && (
         <div 
           onClick={onExpand}
@@ -363,7 +353,6 @@ const Player: React.FC<PlayerProps> = ({
               </div>
             </div>
 
-            {/* Mini Player Controls - Explicitly added Play/Pause here */}
             <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
               <button onClick={onPrev} className="text-white hover:text-subsonic-primary transition-colors hidden sm:block">
                 <SkipBack size={20} fill="currentColor" />
@@ -383,7 +372,6 @@ const Player: React.FC<PlayerProps> = ({
             <div className="hidden sm:block w-8"></div> 
           </div>
           
-          {/* Mini Progress Bar */}
           <div className="absolute top-0 left-0 w-full h-0.5 bg-white/10">
             <div 
                 className="h-full bg-subsonic-primary transition-all duration-500 ease-linear" 
@@ -393,7 +381,6 @@ const Player: React.FC<PlayerProps> = ({
         </div>
       )}
 
-      {/* 3. Persistent Audio Element */}
       {currentSong && (
           <audio 
           ref={audioRef} 

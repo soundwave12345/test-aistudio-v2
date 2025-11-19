@@ -54,6 +54,7 @@ export enum ViewState {
 declare global {
   interface Window {
     cast: any;
+    chrome: any;
     __onGCastApiAvailable: (isAvailable: boolean) => void;
   }
 }

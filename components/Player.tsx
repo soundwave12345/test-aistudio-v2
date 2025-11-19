@@ -156,36 +156,41 @@ const Player: React.FC<PlayerProps> = ({
 
   // --- CHROMECAST LOGIC ---
   const handleCast = async () => {
-      // Check if we are running native (Android/iOS)
-      if (Capacitor.isNativePlatform()) {
+      // Initialize Cast context if available (Standard Web SDK)
+      // Note: This usually requires HTTPS origin.
+      if (window.cast && window.cast.framework) {
+          const context = window.cast.framework.CastContext.getInstance();
+          
           try {
-              // Dynamic import ensures this only runs if the package is installed and we are in a capable environment
-              const { Cast } = await import('@capacitor-community/cast');
+              await context.requestSession();
               
-              await Cast.requestSession();
-              
-              if (currentSong) {
+              // If session connected, load media
+              const session = context.getCurrentSession();
+              if (session && currentSong) {
                   const url = getStreamUrl(credentials, currentSong.id);
-                  await Cast.loadMedia({
-                      url: url,
-                      title: currentSong.title,
-                      subtitle: currentSong.artist,
-                      contentType: 'audio/mp3', 
-                      autoPlay: true
-                  });
+                  const mediaInfo = new window.chrome.cast.media.MediaInfo(url, 'audio/mp3');
+                  
+                  mediaInfo.metadata = new window.chrome.cast.media.MusicTrackMediaMetadata();
+                  mediaInfo.metadata.title = currentSong.title;
+                  mediaInfo.metadata.artist = currentSong.artist;
+                  mediaInfo.metadata.images = [new window.chrome.cast.Image(currentSong.coverArt)];
+
+                  const request = new window.chrome.cast.media.LoadRequest(mediaInfo);
+                  session.loadMedia(request).then(
+                      () => console.log('Load succeed'),
+                      (errorCode: any) => console.error('Error code: ' + errorCode)
+                  );
               }
-          } catch (error) {
-              console.error("Native Cast Error:", error);
-              alert("Cast plugin not installed or failed to initialize on device.");
+          } catch (e) {
+              console.error("Cast error", e);
+              if (window.location.protocol === 'http:') {
+                  alert("Chromecast initiation failed. It likely requires the app to be served over HTTPS.");
+              } else {
+                  alert("Could not connect to Cast device.");
+              }
           }
       } else {
-          // Web Fallback / Warning
-          if (window.location.protocol === 'http:') {
-              alert("Chromecast requires HTTPS. Current connection is HTTP.");
-          } else {
-               // Attempt Web Cast (will likely fail for HTTP streams due to mixed content)
-               alert("Web Casting of HTTP streams (Navidrome) is not supported by browsers due to security rules. Please use the Android App.");
-          }
+          alert("Google Cast API is not available. If you are on Android/HTTP, this is a known limitation.");
       }
   };
 
@@ -236,7 +241,7 @@ const Player: React.FC<PlayerProps> = ({
                 <ChevronDown size={32} />
               </button>
               <span className="text-xs font-bold tracking-widest uppercase text-white/80">Now Playing</span>
-              {/* Cast Button */}
+              {/* Cast Button - Only show if cast API might be available or just to indicate feature */}
               <button onClick={handleCast} className="text-white hover:text-subsonic-primary p-2">
                  <CastIcon size={24} />
               </button>

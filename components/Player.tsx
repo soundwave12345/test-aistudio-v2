@@ -3,7 +3,7 @@ import { Play, Pause, SkipForward, SkipBack, ChevronDown, Shuffle, Repeat, Cast 
 import { Song, SubsonicCredentials, Lyrics } from '../types';
 import { getStreamUrl, getLyrics } from '../services/subsonicService';
 import { Capacitor } from '@capacitor/core';
-import { Chromecast } from '@gameleap/capacitor-chromecast';
+import { Chromecast } from '@caprockapps/capacitor-chromecast';
 
 interface PlayerProps {
   currentSong: Song | null;
@@ -41,7 +41,9 @@ const Player: React.FC<PlayerProps> = ({
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
       // Initialize Native Chromecast Plugin
-      Chromecast.initialize().catch(err => console.error("Chromecast Init Error:", err));
+      // appId 'CC1AD845' is the Default Media Receiver
+      Chromecast.initialize({ appId: 'CC1AD845' })
+        .catch(err => console.error("Chromecast Init Error:", err));
     }
   }, []);
 
@@ -177,6 +179,7 @@ const Player: React.FC<PlayerProps> = ({
         // 2. If successful, load the media
         if (currentSong) {
             const url = getStreamUrl(credentials, currentSong.id);
+            // @caprockapps implementation takes string url
             await Chromecast.launchMedia(url);
         }
     } catch (e) {

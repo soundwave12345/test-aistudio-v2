@@ -3,6 +3,7 @@ import { Play, Pause, SkipForward, SkipBack, ChevronDown, Shuffle, Repeat, Cast 
 import { Song, SubsonicCredentials, Lyrics } from '../types';
 import { getStreamUrl, getLyrics } from '../services/subsonicService';
 import { Capacitor } from '@capacitor/core';
+import { Chromecast } from '@gameleap/capacitor-chromecast';
 
 interface PlayerProps {
   currentSong: Song | null;
@@ -35,6 +36,14 @@ const Player: React.FC<PlayerProps> = ({
   const [showLyrics, setShowLyrics] = useState(false);
   const [lyrics, setLyrics] = useState<Lyrics | null>(null);
   const [parsedLyrics, setParsedLyrics] = useState<{time: number, text: string}[]>([]);
+
+  // --- INITIALIZATION ---
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) {
+      // Initialize Native Chromecast Plugin
+      Chromecast.initialize().catch(err => console.error("Chromecast Init Error:", err));
+    }
+  }, []);
 
   // --- DATA FETCHING ---
   useEffect(() => {
@@ -154,44 +163,26 @@ const Player: React.FC<PlayerProps> = ({
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // --- CHROMECAST LOGIC ---
+  // --- CHROMECAST LOGIC (NATIVE) ---
   const handleCast = async () => {
-      // Initialize Cast context if available (Standard Web SDK)
-      // Note: This usually requires HTTPS origin.
-      if (window.cast && window.cast.framework) {
-          const context = window.cast.framework.CastContext.getInstance();
-          
-          try {
-              await context.requestSession();
-              
-              // If session connected, load media
-              const session = context.getCurrentSession();
-              if (session && currentSong) {
-                  const url = getStreamUrl(credentials, currentSong.id);
-                  const mediaInfo = new window.chrome.cast.media.MediaInfo(url, 'audio/mp3');
-                  
-                  mediaInfo.metadata = new window.chrome.cast.media.MusicTrackMediaMetadata();
-                  mediaInfo.metadata.title = currentSong.title;
-                  mediaInfo.metadata.artist = currentSong.artist;
-                  mediaInfo.metadata.images = [new window.chrome.cast.Image(currentSong.coverArt)];
+    if (!Capacitor.isNativePlatform()) {
+        alert("Native Chromecast is only available when running as an Android App (APK). It is not available in the web browser preview.");
+        return;
+    }
 
-                  const request = new window.chrome.cast.media.LoadRequest(mediaInfo);
-                  session.loadMedia(request).then(
-                      () => console.log('Load succeed'),
-                      (errorCode: any) => console.error('Error code: ' + errorCode)
-                  );
-              }
-          } catch (e) {
-              console.error("Cast error", e);
-              if (window.location.protocol === 'http:') {
-                  alert("Chromecast initiation failed. It likely requires the app to be served over HTTPS.");
-              } else {
-                  alert("Could not connect to Cast device.");
-              }
-          }
-      } else {
-          alert("Google Cast API is not available. If you are on Android/HTTP, this is a known limitation.");
-      }
+    try {
+        // 1. Request Session (Opens the Cast Dialog)
+        await Chromecast.requestSession();
+        
+        // 2. If successful, load the media
+        if (currentSong) {
+            const url = getStreamUrl(credentials, currentSong.id);
+            await Chromecast.launchMedia(url);
+        }
+    } catch (e) {
+        console.error("Native Cast Error:", e);
+        alert("Cast failed. Make sure you are on the same Wi-Fi.");
+    }
   };
 
   // --- UI RENDERING ---
@@ -241,7 +232,7 @@ const Player: React.FC<PlayerProps> = ({
                 <ChevronDown size={32} />
               </button>
               <span className="text-xs font-bold tracking-widest uppercase text-white/80">Now Playing</span>
-              {/* Cast Button - Only show if cast API might be available or just to indicate feature */}
+              {/* Cast Button */}
               <button onClick={handleCast} className="text-white hover:text-subsonic-primary p-2">
                  <CastIcon size={24} />
               </button>
